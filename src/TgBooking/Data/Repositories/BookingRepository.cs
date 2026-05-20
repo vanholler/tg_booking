@@ -20,14 +20,15 @@ public class BookingRepository : IBookingRepository
                     VALUES (@UserId, @ServiceId, @BookingDate, @BookingTime, @Status)
                     RETURNING id AS Id, user_id AS UserId, service_id AS ServiceId, booking_date AS BookingDate,
                               booking_time AS BookingTime, status AS Status, created_at AS CreatedAt, updated_at AS UpdatedAt";
-        return await connection.QuerySingleAsync<Booking>(sql, new
+        var row = await connection.QuerySingleAsync<BookingRow>(sql, new
         {
             UserId = userId,
             ServiceId = serviceId,
-            BookingDate = date,
-            BookingTime = time,
+            BookingDate = date.ToDateTime(TimeOnly.MinValue),
+            BookingTime = time.ToTimeSpan(),
             Status = status
         });
+        return ToBooking(row);
     }
 
     public async Task<BookingDetails?> GetDetailsByIdAsync(int id)
@@ -40,7 +41,8 @@ public class BookingRepository : IBookingRepository
                     INNER JOIN users u ON u.id = b.user_id
                     INNER JOIN services s ON s.id = b.service_id
                     WHERE b.id = @Id";
-        return await connection.QuerySingleOrDefaultAsync<BookingDetails>(sql, new { Id = id });
+        var row = await connection.QuerySingleOrDefaultAsync<BookingDetailsRow>(sql, new { Id = id });
+        return row == null ? null : ToBookingDetails(row);
     }
 
     public async Task<List<BookingDetails>> GetAllDetailsAsync()
@@ -53,8 +55,8 @@ public class BookingRepository : IBookingRepository
                     INNER JOIN users u ON u.id = b.user_id
                     INNER JOIN services s ON s.id = b.service_id
                     ORDER BY b.created_at DESC";
-        var list = await connection.QueryAsync<BookingDetails>(sql);
-        return list.ToList();
+        var list = await connection.QueryAsync<BookingDetailsRow>(sql);
+        return list.Select(ToBookingDetails).ToList();
     }
 
     public async Task<List<TimeOnly>> GetOccupiedTimesAsync(int serviceId, DateOnly date)
@@ -62,7 +64,11 @@ public class BookingRepository : IBookingRepository
         await using var connection = new NpgsqlConnection(_connectionString);
         var sql = @"SELECT booking_time AS BookingTime FROM bookings
                     WHERE service_id = @ServiceId AND booking_date = @BookingDate AND status IN ('Pending', 'Confirmed')";
-        var list = await connection.QueryAsync<TimeOnly>(sql, new { ServiceId = serviceId, BookingDate = date });
+        var list = await connection.QueryAsync<TimeOnly>(sql, new
+        {
+            ServiceId = serviceId,
+            BookingDate = date.ToDateTime(TimeOnly.MinValue)
+        });
         return list.ToList();
     }
 
@@ -72,5 +78,63 @@ public class BookingRepository : IBookingRepository
         var sql = "UPDATE bookings SET status = @NewStatus, updated_at = NOW() WHERE id = @Id AND status = @OldStatus";
         var affected = await connection.ExecuteAsync(sql, new { Id = id, NewStatus = newStatus, OldStatus = oldStatus });
         return affected > 0;
+    }
+
+    private static Booking ToBooking(BookingRow row) => new()
+    {
+        Id = row.Id,
+        UserId = row.UserId,
+        ServiceId = row.ServiceId,
+        BookingDate = row.BookingDate,
+        BookingTime = row.BookingTime,
+        Status = row.Status,
+        CreatedAt = row.CreatedAt,
+        UpdatedAt = row.UpdatedAt
+    };
+
+    private static BookingDetails ToBookingDetails(BookingDetailsRow row) => new()
+    {
+        Id = row.Id,
+        UserId = row.UserId,
+        UserTelegramId = row.UserTelegramId,
+        UserName = row.UserName,
+        UserPhone = row.UserPhone,
+        ServiceId = row.ServiceId,
+        ServiceName = row.ServiceName,
+        ServicePrice = row.ServicePrice,
+        ServiceDurationMinutes = row.ServiceDurationMinutes,
+        BookingDate = row.BookingDate,
+        BookingTime = row.BookingTime,
+        Status = row.Status,
+        CreatedAt = row.CreatedAt
+    };
+
+    private class BookingRow
+    {
+        public int Id { get; set; }
+        public int UserId { get; set; }
+        public int ServiceId { get; set; }
+        public DateOnly BookingDate { get; set; }
+        public TimeOnly BookingTime { get; set; }
+        public string Status { get; set; } = "";
+        public DateTime CreatedAt { get; set; }
+        public DateTime UpdatedAt { get; set; }
+    }
+
+    private class BookingDetailsRow
+    {
+        public int Id { get; set; }
+        public int UserId { get; set; }
+        public long UserTelegramId { get; set; }
+        public string UserName { get; set; } = "";
+        public string UserPhone { get; set; } = "";
+        public int ServiceId { get; set; }
+        public string ServiceName { get; set; } = "";
+        public decimal ServicePrice { get; set; }
+        public int ServiceDurationMinutes { get; set; }
+        public DateOnly BookingDate { get; set; }
+        public TimeOnly BookingTime { get; set; }
+        public string Status { get; set; } = "";
+        public DateTime CreatedAt { get; set; }
     }
 }

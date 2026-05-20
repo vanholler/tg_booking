@@ -47,7 +47,8 @@ public class BookingService : IBookingService
     public async Task<BookingDetails> CreateBookingAsync(int userId, int serviceId, DateOnly date, TimeOnly time)
     {
         var busy = await _bookingRepository.GetOccupiedTimesAsync(serviceId, date);
-        if (busy.Contains(time))
+        var slotKey = time.ToString("HH:mm");
+        if (busy.Any(b => b.ToString("HH:mm") == slotKey))
             throw new Exception("Слот занят");
 
         var booking = await _bookingRepository.CreateAsync(userId, serviceId, date, time, BookingStatus.Pending.ToString());
