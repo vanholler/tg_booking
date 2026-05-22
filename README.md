@@ -34,7 +34,7 @@ docker compose up -d
 
 ## Подготовка VPS
 
-1. Установите Docker и Docker Compose
+1.  Docker и Docker Compose при первичном деплое авто установка. 
 
 ## Структура
 
