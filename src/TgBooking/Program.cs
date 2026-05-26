@@ -8,6 +8,23 @@ using TgBooking.Configuration;
 using TgBooking.Data.Repositories;
 using TgBooking.Services;
 
+static string ReadBotToken(IConfiguration configuration)
+{
+    var token = (configuration["BOT_TOKEN"] ?? configuration["BotToken"] ?? "").Trim();
+
+    if (token.Length >= 2 && token.StartsWith('"') && token.EndsWith('"'))
+        token = token[1..^1].Trim();
+
+    return token;
+}
+
+static long ReadAdminId(IConfiguration configuration)
+{
+    var raw = configuration["ADMIN_TELEGRAM_ID"] ?? configuration["AdminTelegramId"] ?? "0";
+    long.TryParse(raw.Trim(), out var adminId);
+    return adminId;
+}
+
 var host = Host.CreateDefaultBuilder(args)
     .ConfigureAppConfiguration((_, config) =>
     {
@@ -18,21 +35,33 @@ var host = Host.CreateDefaultBuilder(args)
     {
         var configuration = context.Configuration;
 
-        var settings = new BotSettings();
-        settings.BotToken = GetNonEmpty(configuration, "BOT_TOKEN", "BotToken");
-        if (long.TryParse(GetNonEmpty(configuration, "ADMIN_TELEGRAM_ID", "AdminTelegramId"), out var adminId) && adminId != 0)
-            settings.AdminTelegramId = adminId;
+        var settings = new BotSettings
+        {
+            BotToken = ReadBotToken(configuration),
+            AdminTelegramId = ReadAdminId(configuration)
+        };
+
+        if (string.IsNullOrWhiteSpace(settings.BotToken) ||
+            settings.BotToken == "telegram_bot_token" ||
+            !settings.BotToken.Contains(':'))
+        {
+            throw new InvalidOperationException(
+                "BOT_TOKEN не задан или некорректен. Укажите токен от @BotFather в файле .env в корне проекта.");
+        }
 
         var connectionString = GetPostgresConnectionString(configuration);
 
+        var botToken = settings.BotToken;
+
         services.AddSingleton(settings);
-        services.AddSingleton<ITelegramBotClient>(_ => new TelegramBotClient(settings.BotToken));
+        services.AddSingleton<ITelegramBotClient>(_ => new TelegramBotClient(botToken));
 
         services.AddSingleton<IUserRepository>(_ => new UserRepository(connectionString));
         services.AddSingleton<IServiceRepository>(_ => new ServiceRepository(connectionString));
         services.AddSingleton<IBookingRepository>(_ => new BookingRepository(connectionString));
 
         services.AddSingleton<IBookingService, BookingService>();
+        services.AddSingleton<UserStateStore>();
         services.AddSingleton<TelegramBotHandler>();
         services.AddHostedService<BookingBotService>();
     })

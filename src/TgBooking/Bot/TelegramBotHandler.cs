@@ -1,9 +1,11 @@
+using System.Globalization;
 using Telegram.Bot;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
 using Telegram.Bot.Types.ReplyMarkups;
 using TgBooking.Configuration;
 using TgBooking.Data.Repositories;
+using TgBooking.Domain.Entities;
 using TgBooking.Domain.Enums;
 using TgBooking.Services;
 
@@ -16,20 +18,22 @@ public class TelegramBotHandler
     private readonly IUserRepository _userRepository;
     private readonly IServiceRepository _serviceRepository;
     private readonly IBookingService _bookingService;
-    private readonly UserStateStore _states = new();
+    private readonly UserStateStore _states;
 
     public TelegramBotHandler(
         ITelegramBotClient bot,
         BotSettings settings,
         IUserRepository userRepository,
         IServiceRepository serviceRepository,
-        IBookingService bookingService)
+        IBookingService bookingService,
+        UserStateStore states)
     {
         _bot = bot;
         _settings = settings;
         _userRepository = userRepository;
         _serviceRepository = serviceRepository;
         _bookingService = bookingService;
+        _states = states;
     }
 
     public async Task OnUpdate(Update update, CancellationToken ct)
@@ -132,7 +136,11 @@ public class TelegramBotHandler
             return;
         }
 
-        await _bot.SendMessage(chatId, "Главное меню", replyMarkup: BuildMainMenu(isAdmin), cancellationToken: ct);
+        var menuText = isAdmin
+            ? "Главное меню. Админ тоже может нажать «Записаться» и пройти запись как клиент."
+            : "Главное меню";
+
+        await _bot.SendMessage(chatId, menuText, replyMarkup: BuildMainMenu(isAdmin), cancellationToken: ct);
     }
 
     private async Task OnCallback(CallbackQuery callback, CancellationToken ct)
@@ -146,8 +154,20 @@ public class TelegramBotHandler
         var state = _states.Get(chatId);
         var data = callback.Data;
 
-        await _bot.AnswerCallbackQuery(callback.Id, cancellationToken: ct);
+        try
+        {
+            await _bot.AnswerCallbackQuery(callback.Id, cancellationToken: ct);
+            await HandleCallbackData(chatId, tgId, isAdmin, state, data, ct);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("Ошибка callback: " + data + " -> " + ex);
+            await _bot.SendMessage(chatId, "Произошла ошибка, нажмите /start и попробуйте снова", cancellationToken: ct);
+        }
+    }
 
+    private async Task HandleCallbackData(long chatId, long tgId, bool isAdmin, ConversationContext state, string data, CancellationToken ct)
+    {
         if (data == "book")
         {
             await ShowServices(chatId, ct);
@@ -180,20 +200,26 @@ public class TelegramBotHandler
             state.SelectedDate = null;
             state.SelectedTime = null;
             var days = _bookingService.GetDaysForCurrentMonth();
-            await _bot.SendMessage(chatId, "Выберите день", replyMarkup: BuildCalendar(days), cancellationToken: ct);
+            await _bot.SendMessage(chatId, "Выберите день", replyMarkup: BuildCalendar(days, id), cancellationToken: ct);
             return;
         }
 
         if (data.StartsWith("date:"))
         {
-            var dateStr = data.Replace("date:", "");
-            state.SelectedDate = DateOnly.Parse(dateStr);
+            var parts = data.Split(':');
+            if (parts.Length < 3)
+            {
+                await _bot.SendMessage(chatId, "Сессия устарела. Нажмите /start и выберите услугу заново", cancellationToken: ct);
+                return;
+            }
+
+            var serviceId = int.Parse(parts[1]);
+            var date = DateOnly.ParseExact(parts[2], "yyyy-MM-dd", CultureInfo.InvariantCulture);
+            state.SelectedServiceId = serviceId;
+            state.SelectedDate = date;
             state.SelectedTime = null;
 
-            if (state.SelectedServiceId == null)
-                return;
-
-            var busy = await _bookingService.GetBusyTimesAsync(state.SelectedServiceId.Value, state.SelectedDate.Value);
+            var busy = await _bookingService.GetBusyTimesAsync(serviceId, date);
             var free = _bookingService.GetFreeTimes(busy);
 
             if (free.Count == 0)
@@ -202,19 +228,30 @@ public class TelegramBotHandler
                 return;
             }
 
-            await _bot.SendMessage(chatId, "Выберите время", replyMarkup: BuildTimes(free), cancellationToken: ct);
+            await _bot.SendMessage(chatId, "Выберите время", replyMarkup: BuildTimes(free, serviceId, date), cancellationToken: ct);
             return;
         }
 
         if (data.StartsWith("time:"))
         {
-            var timeStr = data.Replace("time:", "");
-            state.SelectedTime = TimeOnly.Parse(timeStr);
-            await _bot.SendMessage(chatId, "Подтвердите запись", replyMarkup: BuildConfirmButton(), cancellationToken: ct);
+            var parts = data.Split(':');
+            if (parts.Length < 4)
+            {
+                await _bot.SendMessage(chatId, "Сессия устарела. Нажмите /start и выберите услугу заново", cancellationToken: ct);
+                return;
+            }
+
+            var serviceId = int.Parse(parts[1]);
+            var date = DateOnly.ParseExact(parts[2], "yyyy-MM-dd", CultureInfo.InvariantCulture);
+            var time = TimeOnly.ParseExact(parts[3], "HH-mm", CultureInfo.InvariantCulture);
+            state.SelectedServiceId = serviceId;
+            state.SelectedDate = date;
+            state.SelectedTime = time;
+            await ShowBookingPreview(chatId, state, ct);
             return;
         }
 
-        if (data == "confirm_booking")
+        if (data == "submit_booking")
         {
             await SaveBooking(chatId, tgId, state, ct);
             return;
@@ -228,10 +265,11 @@ public class TelegramBotHandler
             return;
         }
 
-        if (data.StartsWith("confirm:") && isAdmin)
+        if (data.StartsWith("confirm:") && isAdmin && data != "confirm_booking")
         {
-            var id = int.Parse(data.Replace("confirm:", ""));
-            await AdminAnswer(id, BookingStatus.Confirmed, ct);
+            var idPart = data["confirm:".Length..];
+            if (int.TryParse(idPart, out var bookingId))
+                await AdminAnswer(bookingId, BookingStatus.Confirmed, ct);
             return;
         }
 
@@ -304,6 +342,39 @@ public class TelegramBotHandler
         await _bot.SendMessage(chatId, text, cancellationToken: ct);
     }
 
+    private async Task ShowBookingPreview(long chatId, ConversationContext state, CancellationToken ct)
+    {
+        if (state.SelectedServiceId == null || state.SelectedDate == null || state.SelectedTime == null)
+        {
+            await _bot.SendMessage(chatId, "Сначала выберите услугу, дату и время", cancellationToken: ct);
+            return;
+        }
+
+        var service = await _serviceRepository.GetByIdAsync(state.SelectedServiceId.Value);
+        if (service == null)
+        {
+            await _bot.SendMessage(chatId, "Услуга не найдена, выберите снова", cancellationToken: ct);
+            return;
+        }
+
+        var text = "Подтвердите корректность данных:\n\n";
+        text += "Услуга: " + service.Name + "\n";
+        text += "Дата: " + state.SelectedDate.Value.ToString("dd.MM.yyyy") + "\n";
+        text += "Время: " + state.SelectedTime.Value.ToString("HH:mm") + "\n\n";
+        text += "Всё верно?";
+
+        var keyboard = new InlineKeyboardMarkup(new[]
+        {
+            new[]
+            {
+                InlineKeyboardButton.WithCallbackData("Да, записаться", "submit_booking"),
+                InlineKeyboardButton.WithCallbackData("Отмена", "book")
+            }
+        });
+
+        await _bot.SendMessage(chatId, text, replyMarkup: keyboard, cancellationToken: ct);
+    }
+
     private async Task SaveBooking(long chatId, long tgId, ConversationContext state, CancellationToken ct)
     {
         if (state.SelectedServiceId == null || state.SelectedDate == null || state.SelectedTime == null)
@@ -320,18 +391,31 @@ public class TelegramBotHandler
             return;
         }
 
+        BookingDetails booking;
         try
         {
-            var booking = await _bookingService.CreateBookingAsync(
+            booking = await _bookingService.CreateBookingAsync(
                 user.Id,
                 state.SelectedServiceId.Value,
                 state.SelectedDate.Value,
                 state.SelectedTime.Value);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("Ошибка создания записи: " + ex);
+            var msg = ex.Message.Contains("занят", StringComparison.OrdinalIgnoreCase)
+                ? "Этот слот уже занят, выберите другое время"
+                : "Не удалось записаться. Нажмите /start и попробуйте снова";
+            await _bot.SendMessage(chatId, msg, cancellationToken: ct);
+            return;
+        }
 
-            _states.ClearBookingData(chatId);
-            await _bot.SendMessage(chatId, "Заявка на запись в обработке, ожидайте подтверждения", cancellationToken: ct);
+        _states.ClearBookingData(chatId);
+        await _bot.SendMessage(chatId, "Заявка на запись в обработке, ожидайте подтверждения", cancellationToken: ct);
 
-            var adminText = "Новая заявка\n";
+        try
+        {
+            var adminText = "Новая заявка #" + booking.Id + "\n";
             adminText += "Имя: " + booking.UserName + "\n";
             adminText += "Телефон: " + booking.UserPhone + "\n";
             adminText += "Услуга: " + booking.ServiceName + "\n";
@@ -340,9 +424,9 @@ public class TelegramBotHandler
 
             await _bot.SendMessage(_settings.AdminTelegramId, adminText, replyMarkup: BuildAdminActions(booking.Id), cancellationToken: ct);
         }
-        catch
+        catch (Exception ex)
         {
-            await _bot.SendMessage(chatId, "Не удалось записаться, выберите другое время", cancellationToken: ct);
+            Console.WriteLine("Заявка создана, но админу не отправлено: " + ex);
         }
     }
 
@@ -396,14 +480,15 @@ public class TelegramBotHandler
         });
     }
 
-    private InlineKeyboardMarkup BuildCalendar(List<DateOnly> days)
+    private InlineKeyboardMarkup BuildCalendar(List<DateOnly> days, int serviceId)
     {
         var rows = new List<InlineKeyboardButton[]>();
         var row = new List<InlineKeyboardButton>();
 
         foreach (var day in days)
         {
-            row.Add(InlineKeyboardButton.WithCallbackData(day.Day.ToString(), "date:" + day.ToString("yyyy-MM-dd")));
+            var callback = "date:" + serviceId + ":" + day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+            row.Add(InlineKeyboardButton.WithCallbackData(day.Day.ToString(), callback));
             if (row.Count == 7)
             {
                 rows.Add(row.ToArray());
@@ -417,15 +502,16 @@ public class TelegramBotHandler
         return new InlineKeyboardMarkup(rows);
     }
 
-    private InlineKeyboardMarkup BuildTimes(List<TimeOnly> times)
+    private InlineKeyboardMarkup BuildTimes(List<TimeOnly> times, int serviceId, DateOnly date)
     {
-        var rows = times.Select(t => new[] { InlineKeyboardButton.WithCallbackData(t.ToString("HH:mm"), "time:" + t.ToString("HH\\:mm")) }).ToArray();
+        var datePart = date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        var rows = times.Select(t =>
+        {
+            var timePart = t.ToString("HH-mm", CultureInfo.InvariantCulture);
+            var callback = "time:" + serviceId + ":" + datePart + ":" + timePart;
+            return new[] { InlineKeyboardButton.WithCallbackData(t.ToString("HH:mm", CultureInfo.InvariantCulture), callback) };
+        }).ToArray();
         return new InlineKeyboardMarkup(rows);
-    }
-
-    private InlineKeyboardMarkup BuildConfirmButton()
-    {
-        return new InlineKeyboardMarkup(new[] { new[] { InlineKeyboardButton.WithCallbackData("Записаться", "confirm_booking") } });
     }
 
     private InlineKeyboardMarkup BuildAdminActions(int bookingId)

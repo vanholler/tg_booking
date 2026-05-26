@@ -17,6 +17,7 @@ Telegram-бот для бронирования услуг на C# с PostgreSQL
 
 ```bash
 docker compose up -d
+docker compose up -d --build
 ```
 
 3. Откройте бота в Telegram и отправьте `/start`
@@ -34,7 +35,7 @@ docker compose up -d
 
 ## Подготовка VPS
 
-1. Установите Docker и Docker Compose
+1.  Docker и Docker Compose при первичном деплое авто установка. 
 
 ## Структура
 
