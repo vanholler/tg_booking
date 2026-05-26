@@ -1,5 +1,6 @@
 using Dapper;
 using Npgsql;
+using TgBooking.Common;
 using TgBooking.Domain.Entities;
 
 namespace TgBooking.Data.Repositories;
@@ -10,6 +11,7 @@ public class ServiceRepository : IServiceRepository
 
     public ServiceRepository(string connectionString)
     {
+        Guard.NotNullOrWhiteSpace(connectionString, nameof(connectionString));
         _connectionString = connectionString;
     }
 
@@ -30,6 +32,8 @@ public class ServiceRepository : IServiceRepository
 
     public async Task<Service?> GetByIdAsync(int id)
     {
+        Guard.Positive(id, nameof(id));
+
         try
         {
             await using var connection = new NpgsqlConnection(_connectionString);
@@ -44,6 +48,10 @@ public class ServiceRepository : IServiceRepository
 
     public async Task<Service> CreateAsync(string name, decimal price, int durationMinutes)
     {
+        Guard.NotNullOrWhiteSpace(name, nameof(name));
+        Guard.NonNegative(price, nameof(price));
+        Guard.Positive(durationMinutes, nameof(durationMinutes));
+
         try
         {
             await using var connection = new NpgsqlConnection(_connectionString);
@@ -59,6 +67,8 @@ public class ServiceRepository : IServiceRepository
 
     public async Task<bool> DeleteAsync(int id)
     {
+        Guard.Positive(id, nameof(id));
+
         try
         {
             await using var connection = new NpgsqlConnection(_connectionString);

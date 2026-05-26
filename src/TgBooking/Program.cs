@@ -91,12 +91,30 @@ for (var i = 1; i <= 10; i++)
 
 await host.RunAsync();
 
-static string GetPostgresConnectionString(IConfiguration configuration) =>
-    GetNonEmpty(configuration, "ConnectionStrings:Postgres", "ConnectionStrings__Postgres")
-    ?? configuration.GetConnectionString("Postgres")
-    ?? throw new InvalidOperationException(
-        "Строка подключения Postgres не задана. Укажите ConnectionStrings:Postgres в appsettings.json "
-        + "или переменную окружения ConnectionStrings__Postgres.");
+static string GetPostgresConnectionString(IConfiguration configuration)
+{
+    var full = GetNonEmpty(configuration, "ConnectionStrings:Postgres", "ConnectionStrings__Postgres")
+        ?? configuration.GetConnectionString("Postgres");
+    if (!string.IsNullOrWhiteSpace(full))
+        return full;
+
+    var host = GetNonEmpty(configuration, "POSTGRES_HOST");
+    var port = GetNonEmpty(configuration, "POSTGRES_PORT");
+    var database = GetNonEmpty(configuration, "POSTGRES_DB");
+    var username = GetNonEmpty(configuration, "POSTGRES_USER");
+    var password = configuration["POSTGRES_PASSWORD"];
+
+    if (string.IsNullOrWhiteSpace(database) ||
+        string.IsNullOrWhiteSpace(username) ||
+        string.IsNullOrWhiteSpace(password))
+    {
+        throw new InvalidOperationException(
+            "Параметры Postgres не заданы. Скопируйте .env.example в .env  "
+            + "POSTGRES_DB, POSTGRES_USER, POSTGRES_PASSWORD (или задать ConnectionStrings__Postgres).");
+    }
+
+    return $"Host={host};Port={port};Database={database};Username={username};Password={password}";
+}
 
 static string? GetNonEmpty(IConfiguration configuration, params string[] keys)
 {

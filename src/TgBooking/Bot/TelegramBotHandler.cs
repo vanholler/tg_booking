@@ -3,6 +3,7 @@ using Telegram.Bot;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
 using Telegram.Bot.Types.ReplyMarkups;
+using TgBooking.Common;
 using TgBooking.Configuration;
 using TgBooking.Data.Repositories;
 using TgBooking.Domain.Entities;
@@ -28,6 +29,13 @@ public class TelegramBotHandler
         IBookingService bookingService,
         UserStateStore states)
     {
+        Guard.NotNull(bot, nameof(bot));
+        Guard.NotNull(settings, nameof(settings));
+        Guard.NotNull(userRepository, nameof(userRepository));
+        Guard.NotNull(serviceRepository, nameof(serviceRepository));
+        Guard.NotNull(bookingService, nameof(bookingService));
+        Guard.NotNull(states, nameof(states));
+
         _bot = bot;
         _settings = settings;
         _userRepository = userRepository;
@@ -38,6 +46,8 @@ public class TelegramBotHandler
 
     public async Task OnUpdate(Update update, CancellationToken ct)
     {
+        Guard.NotNull(update, nameof(update));
+
         if (update.CallbackQuery != null)
         {
             await OnCallback(update.CallbackQuery, ct);

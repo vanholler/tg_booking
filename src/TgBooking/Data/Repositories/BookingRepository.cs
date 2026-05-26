@@ -1,5 +1,6 @@
 using Dapper;
 using Npgsql;
+using TgBooking.Common;
 using TgBooking.Domain.Entities;
 
 namespace TgBooking.Data.Repositories;
@@ -10,11 +11,18 @@ public class BookingRepository : IBookingRepository
 
     public BookingRepository(string connectionString)
     {
+        Guard.NotNullOrWhiteSpace(connectionString, nameof(connectionString));
         _connectionString = connectionString;
     }
 
     public async Task<Booking> CreateAsync(int userId, int serviceId, DateOnly date, TimeOnly time, string status)
     {
+        Guard.Positive(userId, nameof(userId));
+        Guard.Positive(serviceId, nameof(serviceId));
+        Guard.BookingDateNotInPast(date);
+        Guard.BookingTime(time);
+        Guard.BookingStatus(status, nameof(status));
+
         try
         {
             await using var connection = new NpgsqlConnection(_connectionString);
@@ -40,6 +48,8 @@ public class BookingRepository : IBookingRepository
 
     public async Task<BookingDetails?> GetDetailsByIdAsync(int id)
     {
+        Guard.Positive(id, nameof(id));
+
         try
         {
             await using var connection = new NpgsqlConnection(_connectionString);
@@ -82,6 +92,8 @@ public class BookingRepository : IBookingRepository
 
     public async Task<List<TimeOnly>> GetOccupiedTimesAsync(int serviceId, DateOnly date)
     {
+        Guard.Positive(serviceId, nameof(serviceId));
+
         try
         {
             await using var connection = new NpgsqlConnection(_connectionString);
@@ -102,6 +114,10 @@ public class BookingRepository : IBookingRepository
 
     public async Task<bool> UpdateStatusAsync(int id, string newStatus, string oldStatus)
     {
+        Guard.Positive(id, nameof(id));
+        Guard.BookingStatus(newStatus, nameof(newStatus));
+        Guard.BookingStatus(oldStatus, nameof(oldStatus));
+
         try
         {
             await using var connection = new NpgsqlConnection(_connectionString);

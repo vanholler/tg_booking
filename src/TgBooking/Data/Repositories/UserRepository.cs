@@ -1,5 +1,6 @@
 using Dapper;
 using Npgsql;
+using TgBooking.Common;
 using TgBooking.Domain.Entities;
 
 namespace TgBooking.Data.Repositories;
@@ -10,11 +11,14 @@ public class UserRepository : IUserRepository
 
     public UserRepository(string connectionString)
     {
+        Guard.NotNullOrWhiteSpace(connectionString, nameof(connectionString));
         _connectionString = connectionString;
     }
 
     public async Task<User?> GetByTelegramIdAsync(long telegramId)
     {
+        Guard.Positive(telegramId, nameof(telegramId));
+
         try
         {
             await using var connection = new NpgsqlConnection(_connectionString);
@@ -29,6 +33,10 @@ public class UserRepository : IUserRepository
 
     public async Task<User> CreateAsync(long telegramId, string name, string phone)
     {
+        Guard.Positive(telegramId, nameof(telegramId));
+        Guard.NotNullOrWhiteSpace(name, nameof(name));
+        Guard.NotNullOrWhiteSpace(phone, nameof(phone));
+
         try
         {
             await using var connection = new NpgsqlConnection(_connectionString);

@@ -3,6 +3,7 @@ using Telegram.Bot;
 using Telegram.Bot.Polling;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
+using TgBooking.Common;
 
 namespace TgBooking.Bot;
 
@@ -13,6 +14,8 @@ public class BookingBotService : BackgroundService
 
     public BookingBotService(ITelegramBotClient bot, TelegramBotHandler handler)
     {
+        Guard.NotNull(bot, nameof(bot));
+        Guard.NotNull(handler, nameof(handler));
         _bot = bot;
         _handler = handler;
     }

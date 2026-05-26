@@ -4,5 +4,6 @@ obj/
 *.user
 *.suo
 appsettings.Development.json
+src/TgBooking/appsettings.json
 .env
 *.db
