@@ -19,13 +19,11 @@ var host = Host.CreateDefaultBuilder(args)
         var configuration = context.Configuration;
 
         var settings = new BotSettings();
-        settings.BotToken = configuration["BotToken"] ?? configuration["BOT_TOKEN"] ?? "";
-        if (long.TryParse(configuration["AdminTelegramId"] ?? configuration["ADMIN_TELEGRAM_ID"], out var adminId))
+        settings.BotToken = GetNonEmpty(configuration, "BOT_TOKEN", "BotToken");
+        if (long.TryParse(GetNonEmpty(configuration, "ADMIN_TELEGRAM_ID", "AdminTelegramId"), out var adminId) && adminId != 0)
             settings.AdminTelegramId = adminId;
 
-        var connectionString = configuration.GetConnectionString("Postgres")
-            ?? configuration["ConnectionStrings__Postgres"]
-            ?? "";
+        var connectionString = GetPostgresConnectionString(configuration);
 
         services.AddSingleton(settings);
         services.AddSingleton<ITelegramBotClient>(_ => new TelegramBotClient(settings.BotToken));
@@ -41,7 +39,7 @@ var host = Host.CreateDefaultBuilder(args)
     .Build();
 
 var config = host.Services.GetRequiredService<IConfiguration>();
-var conn = config.GetConnectionString("Postgres") ?? config["ConnectionStrings__Postgres"] ?? "";
+var conn = GetPostgresConnectionString(config);
 
 for (var i = 1; i <= 10; i++)
 {
@@ -63,3 +61,22 @@ for (var i = 1; i <= 10; i++)
 }
 
 await host.RunAsync();
+
+static string GetPostgresConnectionString(IConfiguration configuration) =>
+    GetNonEmpty(configuration, "ConnectionStrings:Postgres", "ConnectionStrings__Postgres")
+    ?? configuration.GetConnectionString("Postgres")
+    ?? throw new InvalidOperationException(
+        "Строка подключения Postgres не задана. Укажите ConnectionStrings:Postgres в appsettings.json "
+        + "или переменную окружения ConnectionStrings__Postgres.");
+
+static string? GetNonEmpty(IConfiguration configuration, params string[] keys)
+{
+    foreach (var key in keys)
+    {
+        var value = configuration[key];
+        if (!string.IsNullOrWhiteSpace(value))
+            return value;
+    }
+
+    return null;
+}
